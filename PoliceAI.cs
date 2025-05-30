@@ -1,24 +1,34 @@
-﻿using UnityEngine;
+﻿
+using UnityEngine;
 using UnityEngine.AI;
 
 public class PoliceAI_Nav : MonoBehaviour
 {
+    // Reference to the player object
     public Transform player;
+
+    // Vision and behavior parameters
     public float detectionRange = 200f;
     public float chaseSpeed = 15f;
     public float patrolSpeed = 10f;
     public float patrolRadius = 50f;
     public float loseSightDelay = 4f;
 
+    // Internal state variables
     private NavMeshAgent agent;
     private Vector3 patrolTarget;
     private float lastSeenTime;
 
+    // Audio source for siren sound
+    private AudioSource sirenAudio;
+
     void Start()
     {
+        // Get the NavMeshAgent and AudioSource components
         agent = GetComponent<NavMeshAgent>();
+        sirenAudio = GetComponent<AudioSource>();
 
-        // PlayerPrefs'ten zorluk seviyesini oku ve hızları ayarla
+        // Read difficulty setting and adjust speeds accordingly
         string difficulty = PlayerPrefs.GetString("difficulty", "easy");
 
         switch (difficulty)
@@ -35,20 +45,14 @@ public class PoliceAI_Nav : MonoBehaviour
                 chaseSpeed = 25f;
                 patrolSpeed = 20f;
                 break;
-            default:
-                chaseSpeed = 15f;
-                patrolSpeed = 15f;
-                break;
         }
 
-        // NavMesh'e oturt
+        // Ensure the police object is on the NavMesh
         NavMeshHit hit;
         if (NavMesh.SamplePosition(transform.position, out hit, 10f, NavMesh.AllAreas))
-        {
             transform.position = hit.position;
-        }
 
-        // Agent ayarları
+        // Configure NavMeshAgent settings for smooth and responsive movement
         agent.baseOffset = 0f;
         agent.autoBraking = false;
         agent.acceleration = 999f;
@@ -57,24 +61,44 @@ public class PoliceAI_Nav : MonoBehaviour
         agent.updateRotation = true;
         agent.speed = patrolSpeed;
 
+        // Choose an initial patrol destination
         ChooseNewPatrolPoint();
     }
 
     void Update()
     {
+        // If the NavMeshAgent is disabled, skip logic
         if (!agent.enabled) return;
 
+        // Continuously reset acceleration and turning speed for responsiveness
         agent.acceleration = 999f;
         agent.angularSpeed = 999f;
 
+        float distanceToPlayer = Vector3.Distance(transform.position, player.position);
+
+        // Play siren only when close to the player
+        if (distanceToPlayer <= 30f)
+        {
+            if (!sirenAudio.isPlaying)
+                sirenAudio.Play();
+        }
+        else
+        {
+            if (sirenAudio.isPlaying)
+                sirenAudio.Stop();
+        }
+
+        // If player is visible, chase them
         if (CanSeePlayer())
         {
             lastSeenTime = Time.time;
+
             if (agent.speed != chaseSpeed)
                 agent.speed = chaseSpeed;
 
             agent.SetDestination(player.position);
         }
+        // If player was seen recently, continue chasing
         else if (Time.time - lastSeenTime < loseSightDelay)
         {
             if (agent.speed != chaseSpeed)
@@ -82,12 +106,14 @@ public class PoliceAI_Nav : MonoBehaviour
 
             agent.SetDestination(player.position);
         }
+        // Otherwise, return to patrolling
         else
         {
             Patrol();
         }
     }
 
+    // Handles patrolling behavior when not chasing
     void Patrol()
     {
         if (!agent.enabled) return;
@@ -103,6 +129,7 @@ public class PoliceAI_Nav : MonoBehaviour
         agent.SetDestination(patrolTarget);
     }
 
+    // Randomly selects a point within patrol radius that is on the NavMesh
     void ChooseNewPatrolPoint()
     {
         for (int i = 0; i < 30; i++)
@@ -118,9 +145,11 @@ public class PoliceAI_Nav : MonoBehaviour
             }
         }
 
+        // Fallback: go toward the player's last known position
         patrolTarget = player.position;
     }
 
+    // Checks if there is line of sight to the player using a SphereCast
     bool CanSeePlayer()
     {
         if (Vector3.Distance(transform.position, player.position) > detectionRange)
@@ -139,7 +168,7 @@ public class PoliceAI_Nav : MonoBehaviour
             if (hit.transform.CompareTag("Player"))
                 return true;
             else
-                Debug.Log("Ray başka bir şeye çarptı: " + hit.transform.name);
+                Debug.Log("Ray hit something else: " + hit.transform.name);
         }
         else
         {
@@ -149,6 +178,7 @@ public class PoliceAI_Nav : MonoBehaviour
         return false;
     }
 
+    // Handles collision with the player
     void OnCollisionEnter(Collision collision)
     {
         if (collision.gameObject.CompareTag("Player"))
@@ -159,6 +189,7 @@ public class PoliceAI_Nav : MonoBehaviour
                 playerHealth.TakeDamage();
             }
 
+            // Calculate pushback direction and apply recoil
             Vector3 awayFromPlayer = transform.position - collision.transform.position;
             awayFromPlayer.y = 0f;
 
@@ -166,6 +197,7 @@ public class PoliceAI_Nav : MonoBehaviour
         }
     }
 
+    // Applies recoil force and temporarily disables NavMeshAgent
     System.Collections.IEnumerator ApplyRecoil(Vector3 direction)
     {
         float originalSpeed = agent.speed;
@@ -182,6 +214,7 @@ public class PoliceAI_Nav : MonoBehaviour
         rb.isKinematic = true;
         agent.enabled = true;
 
+        // Smoothly restore movement speed over time
         float t = 0f;
         float restoreDuration = 1f;
         while (t < restoreDuration)
